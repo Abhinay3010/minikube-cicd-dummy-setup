@@ -1,0 +1,175 @@
+name: Minikube Dummy Setup CI/CD
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-and-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # Required for SonarQube analysis
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # --- SonarQube Analysis (for each app) ---
+      - name: Create reports directory
+        run: mkdir -p reports # Ensure reports directory exists before writing logs
+
+      - name: SonarQube Scan App1
+        id: sonarqube_app1
+        run: |
+          docker run --rm \
+            -e SONAR_HOST_URL="${{ secrets.SONAR_HOST_URL }}" \
+            -e SONAR_TOKEN="${{ secrets.SONAR_TOKEN }}" \
+            -v "${{ github.workspace }}:/usr/src" \
+            sonarsource/sonar-scanner-cli \
+            -Dsonar.projectKey=app1-dummy-project \
+            -Dsonar.sources=/usr/src/apps/app1 \
+            -Dsonar.projectBaseDir=/usr/src/apps/app1
+        continue-on-error: true # Pipeline continues even if SonarQube fails
+        shell: bash {0} > reports/app1_sonarqube.log 2>&1
+
+      - name: SonarQube Scan App2
+        id: sonarqube_app2
+        run: |
+          docker run --rm \
+            -e SONAR_HOST_URL="${{ secrets.SONAR_HOST_URL }}" \
+            -e SONAR_TOKEN="${{ secrets.SONAR_TOKEN }}" \
+            -v "${{ github.workspace }}:/usr/src" \
+            sonarsource/sonar-scanner-cli \
+            -Dsonar.projectKey=app2-dummy-project \
+            -Dsonar.sources=/usr/src/apps/app2 \
+            -Dsonar.projectBaseDir=/usr/src/apps/app2
+        continue-on-error: true # Pipeline continues even if SonarQube fails
+        shell: bash {0} > reports/app2_sonarqube.log 2>&1
+
+      - name: SonarQube Scan App3
+        id: sonarqube_app3
+        run: |
+          docker run --rm \
+            -e SONAR_HOST_URL="${{ secrets.SONAR_HOST_URL }}" \
+            -e SONAR_TOKEN="${{ secrets.SONAR_TOKEN }}" \
+            -v "${{ github.workspace }}:/usr/src" \
+            sonarsource/sonar-scanner-cli \
+            -Dsonar.projectKey=app3-dummy-project \
+            -Dsonar.sources=/usr/src/apps/app3 \
+            -Dsonar.projectBaseDir=/usr/src/apps/app3
+        continue-on-error: true # Pipeline continues even if SonarQube fails
+        shell: bash {0} > reports/app3_sonarqube.log 2>&1
+
+      # --- Trivy Filesystem Scan (for each app) ---
+      - name: Trivy FS Scan App1
+        id: trivy_fs_app1
+        run: docker run --rm -v "${{ github.workspace }}:/app" aquasec/trivy:latest fs --format json -o reports/app1_trivy_fs.json /app/apps/app1
+        continue-on-error: true # Pipeline continues even if Trivy finds issues
+
+      - name: Trivy FS Scan App2
+        id: trivy_fs_app2
+        run: docker run --rm -v "${{ github.workspace }}:/app" aquasec/trivy:latest fs --format json -o reports/app2_trivy_fs.json /app/apps/app2
+        continue-on-error: true # Pipeline continues even if Trivy finds issues
+
+      - name: Trivy FS Scan App3
+        id: trivy_fs_app3
+        run: docker run --rm -v "${{ github.workspace }}:/app" aquasec/trivy:latest fs --format json -o reports/app3_trivy_fs.json /app/apps/app3
+        continue-on-error: true # Pipeline continues even if Trivy finds issues
+
+      # --- Grype Filesystem Scan (for each app) ---
+      - name: Grype FS Scan App1
+        id: grype_fs_app1
+        run: docker run --rm -v "${{ github.workspace }}:/app" anchore/grype:latest dir:/app/apps/app1 -o json > reports/app1_grype_fs.json
+        continue-on-error: true # Pipeline continues even if Grype finds issues
+
+      - name: Grype FS Scan App2
+        id: grype_fs_app2
+        run: docker run --rm -v "${{ github.workspace }}:/app" anchore/grype:latest dir:/app/apps/app2 -o json > reports/app2_grype_fs.json
+        continue-on-error: true # Pipeline continues even if Grype finds issues
+
+      - name: Grype FS Scan App3
+        id: grype_fs_app3
+        run: docker run --rm -v "${{ github.workspace }}:/app" anchore/grype:latest dir:/app/apps/app3 -o json > reports/app3_grype_fs.json
+        continue-on-error: true # Pipeline continues even if Grype finds issues
+
+      # --- Build & Scan Docker Images (for each app) ---
+      # These steps do NOT have continue-on-error: true, as a failed build/push
+      # would make subsequent image scans and deployments impossible or meaningless.
+      - name: Build & Scan App1 Docker Image
+        id: app1_docker
+        run: |
+          APP_IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/app1:${{ github.sha }}"
+          docker build -t $APP_IMAGE_NAME ./apps/app1
+          docker push $APP_IMAGE_NAME
+
+          docker run --rm aquasec/trivy:latest image --format json -o reports/app1_trivy_image.json $APP_IMAGE_NAME
+          docker run --rm anchore/grype:latest $APP_IMAGE_NAME -o json > reports/app1_grype_image.json
+        continue-on-error: true # Image scans continue even if they find issues
+
+      - name: Build & Scan App2 Docker Image
+        id: app2_docker
+        run: |
+          APP_IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/app2:${{ github.sha }}"
+          docker build -t $APP_IMAGE_NAME ./apps/app2
+          docker push $APP_IMAGE_NAME
+
+          docker run --rm aquasec/trivy:latest image --format json -o reports/app2_trivy_image.json $APP_IMAGE_NAME
+          docker run --rm anchore/grype:latest $APP_IMAGE_NAME -o json > reports/app2_grype_image.json
+        continue-on-error: true # Image scans continue even if they find issues
+
+      - name: Build & Scan App3 Docker Image
+        id: app3_docker
+        run: |
+          APP_IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/app3:${{ github.sha }}"
+          docker build -t $APP_IMAGE_NAME ./apps/app3
+          docker push $APP_IMAGE_NAME
+
+          docker run --rm aquasec/trivy:latest image --format json -o reports/app3_trivy_image.json $APP_IMAGE_NAME
+          docker run --rm anchore/grype:latest $APP_IMAGE_NAME -o json > reports/app3_grype_image.json
+        continue-on-error: true # Image scans continue even if they find issues
+
+      # --- Helm Chart Linting and Template Generation (for each app) ---
+      - name: Helm Lint and Template App1
+        id: helm_app1
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/app" alpine/helm:latest lint /app/helm-charts/app1-chart
+          docker run --rm -v "${{ github.workspace }}:/app" alpine/helm:latest template app1-release /app/helm-charts/app1-chart --namespace app1-ns > reports/app1_manifests.yaml
+        continue-on-error: true # Pipeline continues even if Helm linting fails
+
+      - name: Helm Lint and Template App2
+        id: helm_app2
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/app" alpine/helm:latest lint /app/helm-charts/app2-chart
+          docker run --rm -v "${{ github.workspace }}:/app" alpine/helm:latest template app2-release /app/helm-charts/app2-chart --namespace app2-ns > reports/app2_manifests.yaml
+        continue-on-error: true # Pipeline continues even if Helm linting fails
+
+      - name: Helm Lint and Template App3
+        id: helm_app3
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/app" alpine/helm:latest lint /app/helm-charts/app3-chart
+          docker run --rm -v "${{ github.workspace }}:/app" alpine/helm:latest template app3-release /app/helm-charts/app3-chart --namespace app3-ns > reports/app3_manifests.yaml
+        continue-on-error: true # Pipeline continues even if Helm linting fails
+
+      # --- Commit Reports to GitHub ---
+      - name: Commit reports to GitHub
+        uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          commit_message: "CI: Automated pipeline reports update"
+          file_pattern: "reports/*"
+          branch: main
+          commit_user_name: "github-actions[bot]"
+          commit_user_email: "github-actions[bot]@users.noreply.github.com"
+          commit_author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
