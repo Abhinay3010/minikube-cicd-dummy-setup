@@ -1,0 +1,27 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/<YOUR_GITHUB_USERNAME>/app1 # Will be overridden by pipeline
+  pullPolicy: IfNotPresent
+  tag: "latest" # Will be overridden by pipeline SHA
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations: {}
+  hosts:
+    - host: app1.local
+      paths:
+        - path: /
+          pathType: Prefix
+
+config:
+  APP_ENV: "development"
+  MESSAGE: "Configured for App1"
+
+secrets:
+  DB_PASSWORD: "supersecretpassword" # Base64 encoded in template
