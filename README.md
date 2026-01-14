@@ -1,0 +1,1 @@
+# minikube-cicd-dummy-setup
